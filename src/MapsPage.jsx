@@ -580,15 +580,9 @@ function MapAutoCenter({ markers }) {
   const centeredRef = useRef(false);
 
   useEffect(() => {
-    // Only center on valid non-default-global markers to avoid skewing view to ocean
-    const validMarkers = markers.filter(m => !m._isGlobal);
-    if (validMarkers.length > 0 && !centeredRef.current) {
-      const bounds = L.latLngBounds(validMarkers.map(m => [m.lat, m.lon]));
+    if (markers.length > 0 && !centeredRef.current) {
+      const bounds = L.latLngBounds(markers.map(m => [m.lat, m.lon]));
       map.fitBounds(bounds, { padding: [80, 80], maxZoom: 8 });
-      centeredRef.current = true;
-    } else if (markers.length > 0 && !centeredRef.current) {
-      // Fallback center if only global threats exist
-      map.setView([20, 0], 3);
       centeredRef.current = true;
     }
   }, [markers, map]);
@@ -732,7 +726,6 @@ export default function MapsPage({
   const displayMarkers = useMemo(() => {
     if (!targetZoneMarker || !strictRadiusFilter) return markers;
     return markers.filter(m => {
-      if (m._isGlobal) return true;
       const dist = getHaversineDistance(m.lat, m.lon, targetZoneMarker.lat, targetZoneMarker.lon);
       return dist <= activeRadius;
     });
@@ -872,7 +865,8 @@ export default function MapsPage({
         const isGlobal = targetLoc.toLowerCase() === 'global' || targetLoc.toLowerCase() === 'none';
 
         if (isGlobal) {
-          coords = { lat: 25.0, lon: -35.0 };
+          // Unmapped / global threats without specific geography are not plotted on the map
+          continue;
         } else {
           // 1. Check exact match in CITY_COORDINATES
           coords = CITY_COORDINATES[targetLoc] || CITY_COORDINATES[targetLoc.charAt(0).toUpperCase() + targetLoc.slice(1)];
@@ -971,24 +965,20 @@ export default function MapsPage({
           }
         }
 
+        // If coordinates could not be resolved, do not plot marker
+        if (!coords) continue;
+
         arts.forEach((art, idx) => {
-          let finalCoords = coords;
-
-          if (!finalCoords) {
-            finalCoords = { lat: 25.0, lon: -35.0 };
-          }
-
-          const isActuallyGlobal = isGlobal || (finalCoords.lat === 25.0 && finalCoords.lon === -35.0);
           const angle = (idx / Math.max(arts.length, 1)) * 2 * Math.PI;
           const spread = arts.length > 1 ? 0.012 : 0;
 
           results.push({
             ...art,
-            lat: finalCoords.lat + Math.sin(angle) * spread,
-            lon: finalCoords.lon + Math.cos(angle) * spread,
-            _baseLat: finalCoords.lat,
-            _baseLon: finalCoords.lon,
-            _isGlobal: isActuallyGlobal,
+            lat: coords.lat + Math.sin(angle) * spread,
+            lon: coords.lon + Math.cos(angle) * spread,
+            _baseLat: coords.lat,
+            _baseLon: coords.lon,
+            _isGlobal: false,
           });
         });
       }
@@ -1182,7 +1172,7 @@ export default function MapsPage({
 
   // 7. Country-based Alerts — employee is HIGH RISK if any active alert is in the SAME COUNTRY
   // (e.g. alert in Mumbai → employee in Bangalore → both are India → HIGH RISK)
-  const activeAlerts = markers.filter(m => m.ai?.classification === 'ALERT' && !m._isGlobal);
+  const activeAlerts = markers.filter(m => m.ai?.classification === 'ALERT');
 
   const employeesWithRisk = employeeMarkers.map(emp => {
     // Resolve employee's country name from their country code
@@ -1294,9 +1284,7 @@ export default function MapsPage({
 
   // 9. Interactive fly-to and popup triggers
   const handleSelectThreat = (threat) => {
-    // If it's a global threat, zoom out to global view. Otherwise, zoom in close.
-    const zoomLevel = threat._isGlobal ? 3 : 12;
-    setFlyToCoords({ center: [threat.lat, threat.lon], zoom: zoomLevel });
+    setFlyToCoords({ center: [threat.lat, threat.lon], zoom: 12 });
     setActivePopup({
       position: [threat.lat, threat.lon],
       type: 'threat',
@@ -1309,8 +1297,7 @@ export default function MapsPage({
       mitigation: threat.ai?.mitigation,
       citizen_action: threat.ai?.citizen_action,
       sources: threat.sources,
-      id: threat.id,
-      _isGlobal: threat._isGlobal
+      id: threat.id
     });
   };
 
@@ -1373,19 +1360,7 @@ export default function MapsPage({
     });
   };
 
-  // Custom DivIcon for global/unmapped threat nodes (rendered in North Atlantic ocean)
-  const createGlobalIcon = (classification) => {
-    const isAlert = classification === 'ALERT';
-    return L.divIcon({
-      className: 'global-map-marker',
-      html: `
-        <div class="global-marker-icon ${isAlert ? 'red' : 'blue'}"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></div>
-        ${isAlert ? '<div class="alert-marker-ping"></div>' : ''}
-      `,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
-    });
-  };
+
 
   const createSonarIcon = (hazard) => {
     return L.divIcon({
@@ -1582,7 +1557,6 @@ export default function MapsPage({
                               {threat.ai?.classification}
                             </span>
                             {isPushed && <span className="pushed-badge">PUSHED</span>}
-                            {threat._isGlobal && <span className="pushed-badge" style={{ background: '#6b7280' }}>GLOBAL</span>}
                             <span className="item-time">{new Date(threat.date).toLocaleTimeString()}</span>
                           </div>
                           <h4 className="item-heading">{threat.title}</h4>
@@ -2028,7 +2002,7 @@ export default function MapsPage({
               <Marker
                 key={`alert-${idx}`}
                 position={[art.lat, art.lon]}
-                icon={art._isGlobal ? createGlobalIcon('ALERT') : createAlertIcon(art.ai?.hazard)}
+                icon={createAlertIcon(art.ai?.hazard)}
                 eventHandlers={{ click: () => handleSelectThreat(art) }}
               />
             ))}
@@ -2038,7 +2012,7 @@ export default function MapsPage({
               <Marker
                 key={`info-${idx}`}
                 position={[art.lat, art.lon]}
-                icon={art._isGlobal ? createGlobalIcon('INFORMATIVE') : createInfoIcon()}
+                icon={createInfoIcon()}
                 eventHandlers={{ click: () => handleSelectThreat(art) }}
               />
             ))}
@@ -2083,9 +2057,6 @@ export default function MapsPage({
                       </span>
                       {pushedAlerts.has(activePopup.id) && (
                         <span className="maps-popup-badge" style={{ background: '#10b981', color: 'white', marginLeft: '5px' }}>PUSHED</span>
-                      )}
-                      {activePopup._isGlobal && (
-                        <span className="maps-popup-badge" style={{ background: '#6b7280', color: 'white', marginLeft: '5px' }}>GLOBAL</span>
                       )}
                       <h3 className="maps-popup-title">{activePopup.hazard || 'Hazard'}</h3>
                       <p className="maps-popup-region">{activePopup.region}</p>

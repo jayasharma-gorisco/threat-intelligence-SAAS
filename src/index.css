@@ -1315,29 +1315,7 @@ th {
   100% { transform: scale(2.2); opacity: 0; }
 }
 
-/* Global / Unmapped threat marker */
-.global-map-marker {
-  position: relative;
-  background: transparent;
-  border: none;
-}
-.global-marker-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #1f2937;
-  color: white;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px dashed #ef4444;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  line-height: 1;
-}
-.global-marker-icon.blue {
-  border-color: #3b82f6;
-}
+
 
 /* Alert threat marker */
 .alert-map-marker {
